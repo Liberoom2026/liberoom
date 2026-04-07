@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/run-recurring-billing",
+      "schedule": "0 3 * * *"
+    }
+  ]
+}
