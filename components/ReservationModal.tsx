@@ -8,6 +8,8 @@ type Props = {
   propertyId: number
   pricePerHour: number
   propertyTitle?: string
+  defaultDate?: string;
+defaultPeriod?: string;
 }
 
 type BookingMode = "time" | "period" | "day"
