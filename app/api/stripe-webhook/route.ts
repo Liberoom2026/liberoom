@@ -682,7 +682,20 @@ export async function POST(req: Request) {
     const stripeCustomerId = typeof session.customer === "string" ? session.customer : null;
     const paymentIntentId =
       typeof session.payment_intent === "string" ? session.payment_intent : null;
+let stripePaymentMethod: string | null = null;
 
+if (paymentIntentId) {
+  try {
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+    stripePaymentMethod =
+      typeof paymentIntent.payment_method === "string"
+        ? paymentIntent.payment_method
+        : null;
+  } catch (err) {
+    console.error("ERROR RETRIEVING PAYMENT METHOD:", err);
+  }
+}
     if (!property_id || !guest_name || !guest_email || !date) {
       console.error("Missing metadata on checkout.session.completed", {
         sessionId: session.id,
@@ -851,7 +864,7 @@ export async function POST(req: Request) {
             guest_email,
             stripe_customer_id: stripeCustomerId,
             stripe_payment_intent: paymentIntentId,
-            stripe_payment_method: null,
+            stripe_payment_method: stripePaymentMethod,
             billing_mode,
             recurrence_type,
             recurrence_interval: recurrence_type === "biweekly" ? 2 : 1,
@@ -937,9 +950,9 @@ export async function POST(req: Request) {
           period,
           startTime: isTimeBooking ? start_time : null,
           endTime: isTimeBooking ? end_time : null,
-          billingMode,
-          recurrenceType,
-          monthlyCommitmentMonths,
+          billingMode: billing_mode,
+          recurrenceType: recurrence_type,
+monthlyCommitmentMonths: monthly_commitment_months,
           recurrenceCount: occurrenceDates.length,
           occurrenceDates,
           durationHours: baseDurationHours,
