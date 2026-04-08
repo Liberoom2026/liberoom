@@ -84,10 +84,10 @@ async function getPaymentMethodId(stripe: Stripe, customerId: string) {
 }
 
 async function hasConflictForSlot(
-  supabase: ReturnType<typeof createClient>,
-  propertyId: number,
+  supabase: any,
+  propertyId: string,
   date: string,
-  slot: Slot
+  slot: any
 ) {
   const [bookingsRes, blocksRes] = await Promise.all([
     supabase
