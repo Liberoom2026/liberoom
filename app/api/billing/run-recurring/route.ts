@@ -85,7 +85,7 @@ async function getPaymentMethodId(stripe: Stripe, customerId: string) {
 
 async function hasConflictForSlot(
   supabase: any,
-  propertyId: string | number
+  propertyId: string | number,
   date: string,
   slot: any
 ) {
