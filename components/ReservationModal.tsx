@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 type Props = {
   isOpen: boolean
@@ -8,8 +8,8 @@ type Props = {
   propertyId: number
   pricePerHour: number
   propertyTitle?: string
-  defaultDate?: string;
-defaultPeriod?: string;
+  defaultDate?: string
+  defaultPeriod?: string
 }
 
 type BookingMode = "time" | "period" | "day"
@@ -38,15 +38,19 @@ export default function ReservationModal({
   propertyId,
   pricePerHour,
   propertyTitle = "Espaço",
+  defaultDate = "",
+  defaultPeriod = "morning",
 }: Props) {
   const [guestName, setGuestName] = useState("")
   const [guestEmail, setGuestEmail] = useState("")
-  const [date, setDate] = useState("")
+  const [date, setDate] = useState(defaultDate)
 
-  const [bookingMode, setBookingMode] = useState<BookingMode>("time")
+  const [bookingMode, setBookingMode] = useState<BookingMode>(
+    defaultPeriod ? "period" : "time"
+  )
   const [billingMode, setBillingMode] = useState<BillingMode>("one_time")
 
-  const [period, setPeriod] = useState("morning")
+  const [period, setPeriod] = useState(defaultPeriod)
   const [startTime, setStartTime] = useState("08:00")
   const [endTime, setEndTime] = useState("09:00")
 
@@ -55,6 +59,16 @@ export default function ReservationModal({
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+
+  useEffect(() => {
+    if (!isOpen) return
+
+    setDate(defaultDate || "")
+    setPeriod(defaultPeriod || "morning")
+    if (defaultPeriod) {
+      setBookingMode("period")
+    }
+  }, [isOpen, defaultDate, defaultPeriod])
 
   const duration = useMemo(() => {
     if (bookingMode === "time") return calcDuration(startTime, endTime)
@@ -131,12 +145,27 @@ export default function ReservationModal({
       <div style={modal}>
         <h2>Reservar {propertyTitle}</h2>
 
-        <input placeholder="Nome" value={guestName} onChange={(e) => setGuestName(e.target.value)} />
-        <input placeholder="Email" value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} />
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <input
+          placeholder="Nome"
+          value={guestName}
+          onChange={(e) => setGuestName(e.target.value)}
+        />
+        <input
+          placeholder="Email"
+          value={guestEmail}
+          onChange={(e) => setGuestEmail(e.target.value)}
+        />
+        <input
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+        />
 
         <h3>Tipo de reserva</h3>
-        <select value={bookingMode} onChange={(e) => setBookingMode(e.target.value as any)}>
+        <select
+          value={bookingMode}
+          onChange={(e) => setBookingMode(e.target.value as BookingMode)}
+        >
           <option value="time">Por horário</option>
           <option value="period">Por período</option>
           <option value="day">Diária</option>
@@ -144,8 +173,16 @@ export default function ReservationModal({
 
         {bookingMode === "time" && (
           <>
-            <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
-            <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+            <input
+              type="time"
+              value={startTime}
+              onChange={(e) => setStartTime(e.target.value)}
+            />
+            <input
+              type="time"
+              value={endTime}
+              onChange={(e) => setEndTime(e.target.value)}
+            />
           </>
         )}
 
