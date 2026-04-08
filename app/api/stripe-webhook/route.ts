@@ -1025,7 +1025,7 @@ monthlyCommitmentMonths: monthly_commitment_months,
         nextBillingDate: null,
         siteUrl: process.env.NEXT_PUBLIC_SITE_URL || null,
         bookingIdLabel: "one-time",
-        contractIdLabel: null,
+      
       });
     } catch (emailError) {
       console.error("EMAIL ERROR:", emailError);
