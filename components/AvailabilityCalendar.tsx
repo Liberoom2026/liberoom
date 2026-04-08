@@ -99,12 +99,13 @@ export default function AvailabilityCalendar({ propertyId }: any) {
    {modalOpen && selectedDate && selectedPeriod && (
 
     <ReservationModal
-     propertyId={propertyId}
-     isOpen={modalOpen}
-     onClose={() => setModalOpen(false)}
-     defaultDate={selectedDate.toISOString().split("T")[0]}
-     defaultPeriod={selectedPeriod}
-    />
+  propertyId={propertyId}
+  isOpen={modalOpen}
+  onClose={() => setModalOpen(false)}
+  pricePerHour={Number(property?.price_per_hour ?? 0)}
+  defaultDate={selectedDate.toISOString().split("T")[0]}
+  defaultPeriod={selectedPeriod}
+/>
 
    )}
 
