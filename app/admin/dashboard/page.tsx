@@ -34,9 +34,6 @@ type ContractGroup = {
   recurrenceType: string
   recurrenceInterval: number
   recurrenceCount: number
-  period?: string | null
-  startTime?: string | null
-  endTime?: string | null
   durationHours?: number | null
   firstDate: string
   bookings: Booking[]
@@ -47,8 +44,8 @@ export default function OwnerDashboard() {
     properties: [],
     bookings: [],
   })
+
   const [loading, setLoading] = useState(true)
-  const [actionLoading, setActionLoading] = useState<string>("")
   const [message, setMessage] = useState("")
 
   const email = "gustavoaudi29@gmail.com"
@@ -56,126 +53,63 @@ export default function OwnerDashboard() {
   useEffect(() => {
     async function load() {
       setLoading(true)
-      setMessage("")
 
-      try {
-        const res = await fetch(`/api/owner-bookings?email=${email}`)
-        const json = await res.json()
+      const res = await fetch(`/api/owner-bookings?email=${email}`)
+      const json = await res.json()
 
-        setData({
-          properties: Array.isArray(json?.properties) ? json.properties : [],
-          bookings: Array.isArray(json?.bookings) ? json.bookings : [],
-        })
-      } catch (error) {
-        console.error(error)
-        setData({ properties: [], bookings: [] })
-        setMessage("Erro ao carregar dados.")
-      } finally {
-        setLoading(false)
-      }
+      setData({
+        properties: json.properties || [],
+        bookings: json.bookings || [],
+      })
+
+      setLoading(false)
     }
 
     load()
   }, [])
 
-  const properties = data?.properties || []
-  const bookings = data?.bookings || []
-
-  const totalRevenue = useMemo(() => {
-    return bookings.reduce((acc: number, b: Booking) => {
-      const property = properties.find((p) => p.id === b.property_id)
-      if (!property) return acc
-
-      const duration = Number(b.duration_hours || 1)
-      return acc + property.price_per_hour * duration
-    }, 0)
-  }, [bookings, properties])
+  const properties = data.properties
+  const bookings = data.bookings
 
   const recurringContracts = useMemo(() => {
     const map = new Map<string, ContractGroup>()
 
     for (const booking of bookings) {
       if (!booking.contract_id) continue
-      if (!booking.recurrence_type || booking.recurrence_type === "none") continue
+      if (!booking.recurrence_type) continue
 
       const property = properties.find((p) => p.id === booking.property_id)
       if (!property) continue
 
-      const existing = map.get(booking.contract_id)
-
-      if (!existing) {
+      if (!map.has(booking.contract_id)) {
         map.set(booking.contract_id, {
           contractId: booking.contract_id,
           propertyId: booking.property_id,
           propertyTitle: property.title,
           guestName: booking.guest_name,
           guestEmail: booking.guest_email,
-          recurrenceType: booking.recurrence_type || "weekly_monthly",
-          recurrenceInterval: Number(booking.recurrence_interval || 1),
-          recurrenceCount: Number(booking.recurrence_count || 1),
-          period: booking.period,
-          startTime: booking.start_time,
-          endTime: booking.end_time,
+          recurrenceType: booking.recurrence_type,
+          recurrenceInterval: booking.recurrence_interval || 1,
+          recurrenceCount: booking.recurrence_count || 1,
           durationHours: booking.duration_hours,
           firstDate: booking.date,
           bookings: [booking],
         })
       } else {
-        existing.bookings.push(booking)
-        if (booking.date < existing.firstDate) {
-          existing.firstDate = booking.date
-        }
+        map.get(booking.contract_id)!.bookings.push(booking)
       }
     }
 
-    return Array.from(map.values()).sort((a, b) => a.firstDate.localeCompare(b.firstDate))
+    return Array.from(map.values())
   }, [bookings, properties])
 
-  async function handleCancelContract(contractId: string) {
-    if (!confirm("Tem certeza que deseja cancelar este plano?")) return
-
-    setActionLoading(contractId)
-    setMessage("")
-
-    try {
-      const res = await fetch("/api/contracts/cancel", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          contract_id: contractId,
-        }),
-      })
-
-      const json = await res.json()
-
-      if (!res.ok) {
-        setMessage(json?.error || "Erro ao cancelar contrato.")
-        setActionLoading("")
-        return
-      }
-
-      setMessage(
-        json?.penalty_charged
-          ? "Contrato cancelado e multa cobrada automaticamente."
-          : "Contrato cancelado sem multa."
-      )
-
-      const refresh = await fetch(`/api/owner-bookings?email=${email}`)
-      const refreshJson = await refresh.json()
-
-      setData({
-        properties: Array.isArray(refreshJson?.properties) ? refreshJson.properties : [],
-        bookings: Array.isArray(refreshJson?.bookings) ? refreshJson.bookings : [],
-      })
-    } catch (error) {
-      console.error(error)
-      setMessage("Erro inesperado ao cancelar contrato.")
-    } finally {
-      setActionLoading("")
-    }
-  }
+  const totalRevenue = useMemo(() => {
+    return bookings.reduce((acc, b) => {
+      const property = properties.find((p) => p.id === b.property_id)
+      if (!property) return acc
+      return acc + property.price_per_hour * (b.duration_hours || 1)
+    }, 0)
+  }, [bookings, properties])
 
   if (loading) return <p style={{ padding: 40 }}>Carregando...</p>
 
@@ -183,96 +117,48 @@ export default function OwnerDashboard() {
     <div style={{ padding: 40, maxWidth: 1100, margin: "0 auto" }}>
       <h1>Painel do proprietário</h1>
 
-      {message && (
-        <div style={notice}>
-          {message}
-        </div>
-      )}
+      {message && <div style={notice}>{message}</div>}
 
       {/* RESUMO */}
-      <div style={{ display: "flex", gap: 20, marginBottom: 40, flexWrap: "wrap" }}>
-        <div style={card}>
-          <h3>{properties.length}</h3>
-          <p>Espaços</p>
-        </div>
-
-        <div style={card}>
-          <h3>{bookings.length}</h3>
-          <p>Reservas</p>
-        </div>
-
-        <div style={card}>
-          <h3>R$ {totalRevenue}</h3>
-          <p>Receita estimada</p>
-        </div>
-
-        <div style={card}>
-          <h3>{recurringContracts.length}</h3>
-          <p>Planos recorrentes</p>
-        </div>
+      <div style={summary}>
+        <Card title="Espaços" value={properties.length} />
+        <Card title="Reservas" value={bookings.length} />
+        <Card title="Receita estimada" value={`R$ ${totalRevenue}`} />
+        <Card title="Contratos recorrentes" value={recurringContracts.length} />
       </div>
 
-      {/* PLANOS RECORRENTES */}
+      {/* CONTRATOS */}
       <h2>Planos recorrentes</h2>
 
-      {recurringContracts.length === 0 && (
-        <p>Nenhum plano recorrente encontrado.</p>
-      )}
+      {recurringContracts.map((c) => {
+        const property = properties.find((p) => p.id === c.propertyId)
+        const monthly = (property?.price_per_hour || 0) * (c.durationHours || 1) * 4
 
-      {recurringContracts.map((contract) => (
-        <div key={contract.contractId} style={contractBox}>
-          <div style={contractHeader}>
-            <div>
-              <h3 style={{ margin: 0 }}>{contract.propertyTitle}</h3>
-              <p style={{ margin: "6px 0 0", color: "#6b7280" }}>
-                {contract.guestName} · {contract.guestEmail}
-              </p>
-            </div>
+        return (
+          <div key={c.contractId} style={contractBox}>
+            <h3>{c.propertyTitle}</h3>
 
-            <button
-              onClick={() => handleCancelContract(contract.contractId)}
-              disabled={actionLoading === contract.contractId}
-              style={dangerButton}
-            >
-              {actionLoading === contract.contractId ? "Cancelando..." : "Cancelar plano"}
-            </button>
+            <p>
+              {c.guestName} • {c.guestEmail}
+            </p>
+
+            <p>
+              <strong>Tipo:</strong> {c.recurrenceType}
+            </p>
+
+            <p>
+              <strong>Estimativa mensal:</strong> R$ {monthly}
+            </p>
+
+            <p>
+              <strong>Ocorrências:</strong> {c.bookings.length}
+            </p>
           </div>
+        )
+      })}
 
-          <div style={contractGrid}>
-            <div>
-              <strong>Tipo:</strong> {contract.recurrenceType}
-            </div>
-            <div>
-              <strong>Intervalo:</strong> {contract.recurrenceInterval}
-            </div>
-            <div>
-              <strong>Repetições:</strong> {contract.recurrenceCount}
-            </div>
-            <div>
-              <strong>Data inicial:</strong> {contract.firstDate}
-            </div>
-            <div>
-              <strong>Período:</strong>{" "}
-              {contract.period || "—"}
-            </div>
-            <div>
-              <strong>Horário:</strong>{" "}
-              {contract.startTime && contract.endTime
-                ? `${contract.startTime} - ${contract.endTime}`
-                : "—"}
-            </div>
-          </div>
-
-          <p style={{ marginTop: 12, marginBottom: 0 }}>
-            <strong>Ocorrências geradas:</strong> {contract.bookings.length}
-          </p>
-        </div>
-      ))}
-
-      {/* ESPAÇOS + CALENDÁRIO */}
+      {/* ESPAÇOS */}
       <h2 style={{ marginTop: 40 }}>Seus espaços</h2>
-
-      {properties.length === 0 && <p>Você não possui espaços cadastrados</p>}
 
       {properties.map((p) => (
         <div key={p.id} style={box}>
@@ -286,60 +172,47 @@ export default function OwnerDashboard() {
   )
 }
 
-const card: React.CSSProperties = {
+function Card({ title, value }: any) {
+  return (
+    <div style={card}>
+      <h3>{value}</h3>
+      <p>{title}</p>
+    </div>
+  )
+}
+
+const summary: React.CSSProperties = {
+  display: "flex",
+  gap: 20,
+  marginBottom: 40,
+  flexWrap: "wrap",
+}
+
+const card = {
   flex: "1 1 220px",
   background: "#f5f5f5",
   padding: 20,
   borderRadius: 12,
-  textAlign: "center",
+  textAlign: "center" as const,
 }
 
-const box: React.CSSProperties = {
+const box = {
   border: "1px solid #ddd",
   borderRadius: 12,
   padding: 20,
   marginTop: 20,
-  background: "#fff",
 }
 
-const notice: React.CSSProperties = {
-  margin: "16px 0 24px",
-  padding: "12px 14px",
-  borderRadius: 10,
-  background: "#f9fafb",
-  border: "1px solid #e5e7eb",
-  color: "#111827",
+const notice = {
+  marginBottom: 20,
+  padding: 10,
+  background: "#fef3c7",
+  borderRadius: 8,
 }
 
-const contractBox: React.CSSProperties = {
-  border: "1px solid #e5e7eb",
-  borderRadius: 14,
+const contractBox = {
+  border: "1px solid #ddd",
   padding: 16,
-  marginTop: 16,
-  background: "#fafafa",
-}
-
-const contractHeader: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: 12,
-  alignItems: "start",
-  marginBottom: 14,
-  flexWrap: "wrap",
-}
-
-const contractGrid: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-  gap: 10,
-}
-
-const dangerButton: React.CSSProperties = {
-  border: "none",
-  background: "#ef4444",
-  color: "#fff",
-  padding: "10px 14px",
   borderRadius: 10,
-  cursor: "pointer",
-  fontWeight: 600,
+  marginTop: 10,
 }
