@@ -15,6 +15,9 @@ type Props = {
 type BookingMode = "time" | "period" | "day"
 type BillingMode = "one_time" | "weekly_monthly"
 
+const BACKEND_URL =
+  "https://checkout-backend-git-main-gustavos-projects-7b34e52c.vercel.app"
+
 function parseTime(time: string) {
   const [h, m] = time.split(":").map(Number)
   return h * 60 + m
@@ -94,6 +97,10 @@ export default function ReservationModal({
       date,
       duration_hours: duration,
       billing_mode: billingMode,
+      amount: Math.round(singlePrice * 100),
+      currency: "brl",
+      success_url: `${window.location.origin}/success`,
+      cancel_url: `${window.location.origin}/cancel`,
     }
 
     if (bookingMode === "time") {
@@ -119,23 +126,31 @@ export default function ReservationModal({
 
     setLoading(true)
 
-    const res = await fetch("/api/create-checkout", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    })
+    try {
+      const res = await fetch(
+        `${BACKEND_URL}/api/create-checkout-session`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        }
+      )
 
-    const data = await res.json()
+      const data = await res.json()
 
-    if (!res.ok) {
-      setError(data.error || "Erro")
+      if (!res.ok) {
+        setError(data.error || "Erro")
+        setLoading(false)
+        return
+      }
+
+      window.location.href = data.url
+    } catch (err: any) {
+      setError(err?.message || "Erro ao processar pagamento")
       setLoading(false)
-      return
     }
-
-    window.location.href = data.url
   }
 
   if (!isOpen) return null
