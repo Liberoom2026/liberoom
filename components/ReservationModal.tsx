@@ -90,7 +90,7 @@ export default function ReservationModal({
       return
     }
 
-    const payload: any = {
+    const payload: Record<string, unknown> = {
       property_id: propertyId,
       guest_name: guestName,
       guest_email: guestEmail,
@@ -127,16 +127,13 @@ export default function ReservationModal({
     setLoading(true)
 
     try {
-      const res = await fetch(
-        `${BACKEND_URL}/api/create-checkout-session`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(payload),
-        }
-      )
+      const res = await fetch(`${BACKEND_URL}/api/create-checkout-session`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      })
 
       const data = await res.json()
 
@@ -147,8 +144,8 @@ export default function ReservationModal({
       }
 
       window.location.href = data.url
-    } catch (err: any) {
-      setError(err?.message || "Erro ao processar pagamento")
+    } catch (err) {
+      setError("Erro ao processar pagamento")
       setLoading(false)
     }
   }
@@ -158,7 +155,12 @@ export default function ReservationModal({
   return (
     <div style={overlay}>
       <div style={modal}>
-        <h2>Reservar {propertyTitle}</h2>
+        <div style={headerRow}>
+          <h2 style={{ margin: 0 }}>Reservar {propertyTitle}</h2>
+          <button type="button" onClick={onClose} style={closeButton}>
+            Fechar
+          </button>
+        </div>
 
         <input
           placeholder="Nome"
@@ -280,6 +282,7 @@ const overlay = {
   display: "flex",
   justifyContent: "center",
   alignItems: "center",
+  zIndex: 9999,
 }
 
 const modal = {
@@ -289,4 +292,22 @@ const modal = {
   display: "flex",
   flexDirection: "column" as const,
   gap: 10,
+  width: "min(520px, 92vw)",
+  maxHeight: "90vh",
+  overflowY: "auto" as const,
+}
+
+const headerRow = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 12,
+}
+
+const closeButton = {
+  padding: "6px 10px",
+  borderRadius: 8,
+  border: "1px solid #ccc",
+  background: "#f8f8f8",
+  cursor: "pointer",
 }
