@@ -128,23 +128,33 @@ export default function ReservationModal({
       cancel_url: `${window.location.origin}/cancel`,
     }
 
-    if (bookingMode === "time") {
-      payload.start_time = startTime
-      payload.end_time = endTime
-    }
+if (bookingMode === "time") {
+  payload.start_time = startTime
+  payload.end_time = endTime
+  delete payload.period
+  delete payload.reservation_type
+}
 
-    if (bookingMode === "period") {
-      payload.period = period
-    }
+if (bookingMode === "period") {
+  payload.period = period
+  delete payload.start_time
+  delete payload.end_time
+  delete payload.reservation_type
+}
 
-    if (bookingMode === "day") {
-      payload.period = "day"
-    }
+if (bookingMode === "day") {
+  payload.period = "day"
+  delete payload.start_time
+  delete payload.end_time
+  delete payload.reservation_type
+}
 
-    if (bookingMode === "exclusive") {
-      payload.period = "day"
-      payload.reservation_type = "exclusive"
-    }
+if (bookingMode === "exclusive") {
+  payload.period = "day"
+  payload.reservation_type = "exclusive"
+  delete payload.start_time
+  delete payload.end_time
+}
 
     if (planMode === "weekly_monthly") {
       payload.recurrence_type = "weekly"
