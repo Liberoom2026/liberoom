@@ -24,7 +24,8 @@ function parseTime(time: string) {
 }
 
 function calcDuration(start: string, end: string) {
-  return Math.max(1, Math.ceil((parseTime(end) - parseTime(start)) / 60))
+  const minutes = parseTime(end) - parseTime(start)
+  return Math.max(1, Math.ceil(minutes / 60))
 }
 
 function periodHours(period: string) {
@@ -32,7 +33,7 @@ function periodHours(period: string) {
   if (period === "afternoon") return 6
   if (period === "evening") return 4
   if (period === "day") return 24
-  return 1
+  return 0
 }
 
 export default function ReservationModal({
@@ -68,15 +69,23 @@ export default function ReservationModal({
 
     setDate(defaultDate || "")
     setPeriod(defaultPeriod || "morning")
-    if (defaultPeriod) {
-      setBookingMode("period")
-    }
+    if (defaultPeriod) setBookingMode("period")
   }, [isOpen, defaultDate, defaultPeriod])
 
   const duration = useMemo(() => {
-    if (bookingMode === "time") return calcDuration(startTime, endTime)
-    if (bookingMode === "day") return 24
-    return periodHours(period)
+    if (bookingMode === "time") {
+      return calcDuration(startTime, endTime)
+    }
+
+    if (bookingMode === "period") {
+      return periodHours(period)
+    }
+
+    if (bookingMode === "day") {
+      return 24
+    }
+
+    return 0
   }, [bookingMode, startTime, endTime, period])
 
   const singlePrice = pricePerHour * duration
@@ -86,19 +95,45 @@ export default function ReservationModal({
     setError("")
 
     if (!guestName || !guestEmail || !date) {
-      setError("Preencha todos os campos")
+      setError("Preencha nome, email e data")
       return
     }
+
+    if (bookingMode === "time") {
+      if (!startTime || !endTime) {
+        setError("Preencha o horário inicial e final")
+        return
+      }
+
+      if (parseTime(endTime) <= parseTime(startTime)) {
+        setError("A hora final precisa ser maior que a inicial")
+        return
+      }
+    }
+
+    if (bookingMode === "period" && !period) {
+      setError("Escolha um período")
+      return
+    }
+
+    const durationHours =
+      bookingMode === "time"
+        ? calcDuration(startTime, endTime)
+        : bookingMode === "period"
+          ? periodHours(period)
+          : 24
+
+    const amount = Math.round(durationHours * pricePerHour * 100)
 
     const payload: Record<string, unknown> = {
       property_id: propertyId,
       guest_name: guestName,
       guest_email: guestEmail,
       date,
-      duration_hours: duration,
-      billing_mode: billingMode,
-      amount: Math.round(singlePrice * 100),
+      duration_hours: durationHours,
+      amount,
       currency: "brl",
+      billing_mode: billingMode,
       success_url: `${window.location.origin}/success`,
       cancel_url: `${window.location.origin}/cancel`,
     }
@@ -121,6 +156,8 @@ export default function ReservationModal({
       payload.recurrence_interval = 1
       payload.recurrence_count = 4
       payload.weekday = weekday
+      payload.months_count = months
+      payload.recurrence_months = months
       payload.monthly_commitment_months = months
     }
 
@@ -138,7 +175,7 @@ export default function ReservationModal({
       const data = await res.json()
 
       if (!res.ok) {
-        setError(data.error || "Erro")
+        setError(data.error || "Erro ao criar checkout")
         setLoading(false)
         return
       }
@@ -205,6 +242,7 @@ export default function ReservationModal({
 
         {bookingMode === "period" && (
           <select value={period} onChange={(e) => setPeriod(e.target.value)}>
+            <option value="">Selecione</option>
             <option value="morning">Manhã</option>
             <option value="afternoon">Tarde</option>
             <option value="evening">Noite</option>
