@@ -14,9 +14,15 @@ type Props = {
 
 type BookingMode = "time" | "period" | "day" | "exclusive"
 type PlanMode = "one_time" | "weekly_monthly"
+type BlockRange = {
+  id?: number | string
+  property_id?: number
+  start_at: string
+  end_at: string
+  status?: string
+}
 
-const BACKEND_URL =
-  "https://checkout-backend-beta.vercel.app"
+const BACKEND_URL = "https://checkout-backend-beta.vercel.app"
 
 function parseTime(time: string) {
   const [h, m] = time.split(":").map(Number)
@@ -34,6 +40,59 @@ function periodHours(period: string) {
   if (period === "evening") return 4
   if (period === "day") return 24
   return 0
+}
+
+function pad(n: number) {
+  return String(n).padStart(2, "0")
+}
+
+function toDateKey(date: Date) {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+function parseDateKey(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number)
+  return new Date(year, month - 1, day)
+}
+
+function startOfMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1)
+}
+
+function addMonths(date: Date, amount: number) {
+  return new Date(date.getFullYear(), date.getMonth() + amount, 1)
+}
+
+function getMonthLabel(date: Date) {
+  return new Intl.DateTimeFormat("pt-BR", {
+    month: "long",
+    year: "numeric",
+  }).format(date)
+}
+
+function buildMonthGrid(monthDate: Date) {
+  const year = monthDate.getFullYear()
+  const month = monthDate.getMonth()
+  const firstDay = new Date(year, month, 1)
+  const lastDay = new Date(year, month + 1, 0)
+  const startWeekday = (firstDay.getDay() + 6) % 7
+  const totalDays = lastDay.getDate()
+
+  const cells: Array<Date | null> = []
+
+  for (let i = 0; i < startWeekday; i++) {
+    cells.push(null)
+  }
+
+  for (let day = 1; day <= totalDays; day++) {
+    cells.push(new Date(year, month, day))
+  }
+
+  while (cells.length % 7 !== 0) {
+    cells.push(null)
+  }
+
+  return cells
 }
 
 export default function ReservationModal({
@@ -61,7 +120,10 @@ export default function ReservationModal({
   const [weekday, setWeekday] = useState("1")
   const [months, setMonths] = useState(1)
 
-  const [blockedRanges, setBlockedRanges] = useState<any[]>([])
+  const [blockedRanges, setBlockedRanges] = useState<BlockRange[]>([])
+  const [currentMonth, setCurrentMonth] = useState<Date>(
+    startOfMonth(defaultDate ? parseDateKey(defaultDate) : new Date())
+  )
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -71,27 +133,34 @@ export default function ReservationModal({
 
     setDate(defaultDate || "")
     setPeriod(defaultPeriod || "morning")
+    setError("")
 
     if (defaultPeriod) {
       setBookingMode("period")
     }
 
+    const baseDate = defaultDate ? parseDateKey(defaultDate) : new Date()
+    setCurrentMonth(startOfMonth(baseDate))
     fetchBlocks()
-  }, [isOpen, defaultDate, defaultPeriod])
+  }, [isOpen, defaultDate, defaultPeriod, propertyId])
 
   async function fetchBlocks() {
     if (!propertyId) return
 
-    const today = new Date()
-    const future = new Date()
-    future.setMonth(today.getMonth() + 2)
+    try {
+      const today = new Date()
+      const future = new Date()
+      future.setMonth(today.getMonth() + 2)
 
-    const res = await fetch(
-      `${BACKEND_URL}/api/get-booking-blocks?property_id=${propertyId}&start_date=${today.toISOString()}&end_date=${future.toISOString()}`
-    )
+      const res = await fetch(
+        `${BACKEND_URL}/api/get-booking-blocks?property_id=${propertyId}&start_date=${today.toISOString()}&end_date=${future.toISOString()}`
+      )
 
-    const data = await res.json()
-    setBlockedRanges(data.blocks || [])
+      const data = await res.json()
+      setBlockedRanges(Array.isArray(data.blocks) ? data.blocks : [])
+    } catch {
+      setBlockedRanges([])
+    }
   }
 
   function isTimeBlocked(selectedDate: string, start: string, end: string) {
@@ -108,6 +177,44 @@ export default function ReservationModal({
     })
   }
 
+  function getDayStatus(day: Date) {
+    const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, 0, 0, 0)
+    const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 23, 59, 59, 999)
+
+    let hasAnyOverlap = false
+    let hasFullDayBlock = false
+
+    for (const block of blockedRanges) {
+      const blockStart = new Date(block.start_at)
+      const blockEnd = new Date(block.end_at)
+
+      const overlaps = blockStart <= dayEnd && blockEnd >= dayStart
+      if (overlaps) {
+        hasAnyOverlap = true
+
+        if (blockStart <= dayStart && blockEnd >= dayEnd) {
+          hasFullDayBlock = true
+          break
+        }
+      }
+    }
+
+    if (hasFullDayBlock) return "occupied"
+    if (hasAnyOverlap) return "partial"
+    return "free"
+  }
+
+  const selectedDayBlocks = useMemo(() => {
+    if (!date) return []
+
+    return blockedRanges
+      .filter((block) => {
+        const blockStart = new Date(block.start_at)
+        return toDateKey(blockStart) === date
+      })
+      .sort((a, b) => +new Date(a.start_at) - +new Date(b.start_at))
+  }, [blockedRanges, date])
+
   const duration = useMemo(() => {
     if (bookingMode === "time") return calcDuration(startTime, endTime)
     if (bookingMode === "period") return periodHours(period)
@@ -115,8 +222,7 @@ export default function ReservationModal({
     return 0
   }, [bookingMode, startTime, endTime, period])
 
-  const estimatedTimePrice =
-    bookingMode === "time" ? pricePerHour * duration : null
+  const estimatedTimePrice = bookingMode === "time" ? pricePerHour * duration : null
 
   async function handleCheckout() {
     setError("")
@@ -152,8 +258,8 @@ export default function ReservationModal({
       bookingMode === "time"
         ? calcDuration(startTime, endTime)
         : bookingMode === "period"
-        ? periodHours(period)
-        : 24
+          ? periodHours(period)
+          : 24
 
     const payload: Record<string, unknown> = {
       property_id: propertyId,
@@ -200,16 +306,13 @@ export default function ReservationModal({
     setLoading(true)
 
     try {
-      const res = await fetch(
-        `${BACKEND_URL}/api/create-checkout-session`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(payload),
-        }
-      )
+      const res = await fetch(`${BACKEND_URL}/api/create-checkout-session`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      })
 
       const data = await res.json()
 
@@ -227,6 +330,8 @@ export default function ReservationModal({
   }
 
   if (!isOpen) return null
+
+  const monthCells = buildMonthGrid(currentMonth)
 
   return (
     <div style={overlay}>
@@ -248,11 +353,115 @@ export default function ReservationModal({
           value={guestEmail}
           onChange={(e) => setGuestEmail(e.target.value)}
         />
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-        />
+
+        <div style={calendarCard}>
+          <div style={calendarHeader}>
+            <button
+              type="button"
+              style={navButton}
+              onClick={() => setCurrentMonth((prev) => addMonths(prev, -1))}
+            >
+              ←
+            </button>
+
+            <strong style={{ textTransform: "capitalize" }}>
+              {getMonthLabel(currentMonth)}
+            </strong>
+
+            <button
+              type="button"
+              style={navButton}
+              onClick={() => setCurrentMonth((prev) => addMonths(prev, 1))}
+            >
+              →
+            </button>
+          </div>
+
+          <div style={weekHeader}>
+            {["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"].map((day) => (
+              <div key={day} style={weekDayLabel}>
+                {day}
+              </div>
+            ))}
+          </div>
+
+          <div style={calendarGrid}>
+            {monthCells.map((cell, index) => {
+              if (!cell) {
+                return <div key={`empty-${index}`} style={emptyDayCell} />
+              }
+
+              const key = toDateKey(cell)
+              const status = getDayStatus(cell)
+              const isSelected = date === key
+              const isDisabled = status === "occupied"
+
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  disabled={isDisabled}
+                  onClick={() => {
+                    setDate(key)
+                    setError("")
+                  }}
+                  style={{
+                    ...dayCell,
+                    ...(status === "free" ? dayFree : {}),
+                    ...(status === "partial" ? dayPartial : {}),
+                    ...(status === "occupied" ? dayOccupied : {}),
+                    ...(isSelected ? daySelected : {}),
+                    ...(isDisabled ? dayDisabled : {}),
+                  }}
+                >
+                  {cell.getDate()}
+                </button>
+              )
+            })}
+          </div>
+
+          <div style={legendRow}>
+            <div style={legendItem}>
+              <span style={{ ...legendDot, background: "#e5f7eb" }} />
+              Livre
+            </div>
+            <div style={legendItem}>
+              <span style={{ ...legendDot, background: "#fff3cd" }} />
+              Parcial
+            </div>
+            <div style={legendItem}>
+              <span style={{ ...legendDot, background: "#f8d7da" }} />
+              Ocupado
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <strong>Data selecionada:</strong>{" "}
+          {date ? new Intl.DateTimeFormat("pt-BR").format(parseDateKey(date)) : "nenhuma"}
+        </div>
+
+        {selectedDayBlocks.length > 0 && (
+          <div style={blocksBox}>
+            <strong>Bloqueios nesse dia</strong>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {selectedDayBlocks.map((block, index) => (
+                <div key={`${block.id || index}`} style={blockLine}>
+                  {new Date(block.start_at).toLocaleTimeString("pt-BR", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}{" "}
+                  -{" "}
+                  {new Date(block.end_at).toLocaleTimeString("pt-BR", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                  {block.status ? ` · ${block.status}` : ""}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <h3>Tipo de reserva</h3>
         <select
@@ -272,6 +481,7 @@ export default function ReservationModal({
               value={startTime}
               onChange={(e) => {
                 const newStart = e.target.value
+                setError("")
 
                 if (isTimeBlocked(date, newStart, endTime)) {
                   setError("Horário indisponível")
@@ -286,6 +496,7 @@ export default function ReservationModal({
               value={endTime}
               onChange={(e) => {
                 const newEnd = e.target.value
+                setError("")
 
                 if (isTimeBlocked(date, startTime, newEnd)) {
                   setError("Horário indisponível")
@@ -405,4 +616,120 @@ const closeButton = {
   border: "1px solid #ccc",
   background: "#f8f8f8",
   cursor: "pointer",
+}
+
+const calendarCard = {
+  border: "1px solid #e5e7eb",
+  borderRadius: 12,
+  padding: 12,
+  background: "#fafafa",
+  display: "flex",
+  flexDirection: "column" as const,
+  gap: 10,
+}
+
+const calendarHeader = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+}
+
+const navButton = {
+  padding: "6px 10px",
+  borderRadius: 8,
+  border: "1px solid #d1d5db",
+  background: "white",
+  cursor: "pointer",
+  minWidth: 40,
+}
+
+const weekHeader = {
+  display: "grid",
+  gridTemplateColumns: "repeat(7, 1fr)",
+  gap: 6,
+}
+
+const weekDayLabel = {
+  textAlign: "center" as const,
+  fontSize: 12,
+  fontWeight: 600,
+  color: "#6b7280",
+}
+
+const calendarGrid = {
+  display: "grid",
+  gridTemplateColumns: "repeat(7, 1fr)",
+  gap: 6,
+}
+
+const emptyDayCell = {
+  minHeight: 40,
+}
+
+const dayCell = {
+  minHeight: 40,
+  borderRadius: 10,
+  border: "1px solid #d1d5db",
+  background: "white",
+  cursor: "pointer",
+  fontWeight: 600,
+}
+
+const dayFree = {
+  background: "#e5f7eb",
+}
+
+const dayPartial = {
+  background: "#fff3cd",
+}
+
+const dayOccupied = {
+  background: "#f8d7da",
+}
+
+const daySelected = {
+  outline: "2px solid #111827",
+  outlineOffset: 1,
+}
+
+const dayDisabled = {
+  cursor: "not-allowed",
+  opacity: 0.75,
+}
+
+const legendRow = {
+  display: "flex",
+  gap: 12,
+  flexWrap: "wrap" as const,
+  fontSize: 12,
+}
+
+const legendItem = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+}
+
+const legendDot = {
+  width: 12,
+  height: 12,
+  borderRadius: 999,
+  display: "inline-block",
+  border: "1px solid #d1d5db",
+}
+
+const blocksBox = {
+  border: "1px solid #f3c7cc",
+  background: "#fff5f6",
+  borderRadius: 10,
+  padding: 10,
+  display: "flex",
+  flexDirection: "column" as const,
+  gap: 8,
+}
+
+const blockLine = {
+  fontSize: 13,
+  color: "#7f1d1d",
 }
