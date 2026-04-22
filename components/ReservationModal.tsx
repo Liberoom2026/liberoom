@@ -107,6 +107,18 @@ export default function ReservationModal({
     })
   }
 
+  // 🔥 NOVO: disponibilidade por dia
+  const selectedDayBlocks = useMemo(() => {
+    if (!date) return []
+
+    return blockedRanges
+      .filter((block) => {
+        const blockStart = new Date(block.start_at)
+        return blockStart.toISOString().slice(0, 10) === date
+      })
+      .sort((a, b) => +new Date(a.start_at) - +new Date(b.start_at))
+  }, [blockedRanges, date])
+
   const duration = useMemo(() => {
     if (bookingMode === "time") return calcDuration(startTime, endTime)
     if (bookingMode === "period") return periodHours(period)
@@ -186,16 +198,6 @@ export default function ReservationModal({
       payload.reservation_type = "exclusive"
     }
 
-    if (planMode === "weekly_monthly") {
-      payload.recurrence_type = "weekly"
-      payload.recurrence_interval = 1
-      payload.recurrence_count = 4
-      payload.weekday = weekday
-      payload.months_count = months
-      payload.recurrence_months = months
-      payload.monthly_commitment_months = months
-    }
-
     setLoading(true)
 
     try {
@@ -230,14 +232,7 @@ export default function ReservationModal({
   return (
     <div style={overlay}>
       <div style={modal}>
-        <div style={headerRow}>
-          <h2 style={{ margin: 0, color: "red" }}>
-            TESTE NOVO MODAL 🚨
-          </h2>
-          <button type="button" onClick={onClose} style={closeButton}>
-            Fechar
-          </button>
-        </div>
+        <h2>Reservar {propertyTitle}</h2>
 
         <input
           placeholder="Nome"
@@ -249,11 +244,42 @@ export default function ReservationModal({
           value={guestEmail}
           onChange={(e) => setGuestEmail(e.target.value)}
         />
+
+        {/* CALENDÁRIO NORMAL */}
         <input
           type="date"
           value={date}
           onChange={(e) => setDate(e.target.value)}
         />
+
+        {/* 🔥 DISPONIBILIDADE */}
+        {date && (
+          <div style={availabilityBox}>
+            <strong>Disponibilidade</strong>
+
+            {selectedDayBlocks.length === 0 ? (
+              <p style={{ color: "green" }}>Dia totalmente livre</p>
+            ) : (
+              <>
+                <p style={{ color: "red" }}>Horários ocupados:</p>
+
+                {selectedDayBlocks.map((block, i) => (
+                  <div key={i}>
+                    {new Date(block.start_at).toLocaleTimeString("pt-BR", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}{" "}
+                    -{" "}
+                    {new Date(block.end_at).toLocaleTimeString("pt-BR", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        )}
 
         <h3>Tipo de reserva</h3>
         <select
@@ -268,13 +294,11 @@ export default function ReservationModal({
 
         {bookingMode === "time" && (
           <>
-            <label>Hora inicial</label>
             <input
               type="time"
               value={startTime}
               onChange={(e) => setStartTime(e.target.value)}
             />
-            <label>Hora final</label>
             <input
               type="time"
               value={endTime}
@@ -282,6 +306,8 @@ export default function ReservationModal({
             />
           </>
         )}
+
+        {error && <p style={{ color: "red" }}>{error}</p>}
 
         <button onClick={handleCheckout} disabled={loading}>
           {loading ? "Processando..." : "Confirmar reserva"}
@@ -311,16 +337,9 @@ const modal = {
   width: "min(520px, 92vw)",
 }
 
-const headerRow = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-}
-
-const closeButton = {
-  padding: "6px 10px",
-  borderRadius: 8,
-  border: "1px solid #ccc",
-  background: "#f8f8f8",
-  cursor: "pointer",
+const availabilityBox = {
+  border: "1px solid #ddd",
+  borderRadius: 10,
+  padding: 10,
+  background: "#fafafa",
 }
