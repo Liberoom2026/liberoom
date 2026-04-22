@@ -12,8 +12,8 @@ type Props = {
   defaultPeriod?: string
 }
 
-type BookingMode = "time" | "period" | "day"
-type BillingMode = "one_time" | "weekly_monthly"
+type BookingMode = "time" | "period" | "day" | "exclusive"
+type PlanMode = "one_time" | "weekly_monthly"
 
 const BACKEND_URL =
   "https://checkout-backend-git-main-gustavos-projects-7b34e52c.vercel.app"
@@ -24,8 +24,8 @@ function parseTime(time: string) {
 }
 
 function calcDuration(start: string, end: string) {
-  const minutes = parseTime(end) - parseTime(start)
-  return Math.max(1, Math.ceil(minutes / 60))
+  const diff = parseTime(end) - parseTime(start)
+  return Math.max(1, Math.ceil(diff / 60))
 }
 
 function periodHours(period: string) {
@@ -52,7 +52,7 @@ export default function ReservationModal({
   const [bookingMode, setBookingMode] = useState<BookingMode>(
     defaultPeriod ? "period" : "time"
   )
-  const [billingMode, setBillingMode] = useState<BillingMode>("one_time")
+  const [planMode, setPlanMode] = useState<PlanMode>("one_time")
 
   const [period, setPeriod] = useState(defaultPeriod)
   const [startTime, setStartTime] = useState("08:00")
@@ -69,27 +69,19 @@ export default function ReservationModal({
 
     setDate(defaultDate || "")
     setPeriod(defaultPeriod || "morning")
-    if (defaultPeriod) setBookingMode("period")
+    if (defaultPeriod) {
+      setBookingMode("period")
+    }
   }, [isOpen, defaultDate, defaultPeriod])
 
   const duration = useMemo(() => {
-    if (bookingMode === "time") {
-      return calcDuration(startTime, endTime)
-    }
-
-    if (bookingMode === "period") {
-      return periodHours(period)
-    }
-
-    if (bookingMode === "day") {
-      return 24
-    }
-
+    if (bookingMode === "time") return calcDuration(startTime, endTime)
+    if (bookingMode === "period") return periodHours(period)
+    if (bookingMode === "day" || bookingMode === "exclusive") return 24
     return 0
   }, [bookingMode, startTime, endTime, period])
 
-  const singlePrice = pricePerHour * duration
-  const monthlyEstimate = singlePrice * 4
+  const estimatedTimePrice = bookingMode === "time" ? pricePerHour * duration : null
 
   async function handleCheckout() {
     setError("")
@@ -123,17 +115,15 @@ export default function ReservationModal({
           ? periodHours(period)
           : 24
 
-    const amount = Math.round(durationHours * pricePerHour * 100)
-
     const payload: Record<string, unknown> = {
       property_id: propertyId,
       guest_name: guestName,
       guest_email: guestEmail,
       date,
       duration_hours: durationHours,
-      amount,
+      billing_mode: bookingMode,
+      reservation_type: bookingMode,
       currency: "brl",
-      billing_mode: billingMode,
       success_url: `${window.location.origin}/success`,
       cancel_url: `${window.location.origin}/cancel`,
     }
@@ -151,7 +141,12 @@ export default function ReservationModal({
       payload.period = "day"
     }
 
-    if (billingMode === "weekly_monthly") {
+    if (bookingMode === "exclusive") {
+      payload.period = "day"
+      payload.reservation_type = "exclusive"
+    }
+
+    if (planMode === "weekly_monthly") {
       payload.recurrence_type = "weekly"
       payload.recurrence_interval = 1
       payload.recurrence_count = 4
@@ -223,6 +218,7 @@ export default function ReservationModal({
           <option value="time">Por horário</option>
           <option value="period">Por período</option>
           <option value="day">Diária</option>
+          <option value="exclusive">Exclusiva</option>
         </select>
 
         {bookingMode === "time" && (
@@ -254,8 +250,8 @@ export default function ReservationModal({
         <label>
           <input
             type="radio"
-            checked={billingMode === "one_time"}
-            onChange={() => setBillingMode("one_time")}
+            checked={planMode === "one_time"}
+            onChange={() => setPlanMode("one_time")}
           />
           Reserva única
         </label>
@@ -263,13 +259,13 @@ export default function ReservationModal({
         <label>
           <input
             type="radio"
-            checked={billingMode === "weekly_monthly"}
-            onChange={() => setBillingMode("weekly_monthly")}
+            checked={planMode === "weekly_monthly"}
+            onChange={() => setPlanMode("weekly_monthly")}
           />
           Plano semanal (cobrança mensal)
         </label>
 
-        {billingMode === "weekly_monthly" && (
+        {planMode === "weekly_monthly" && (
           <>
             <select value={weekday} onChange={(e) => setWeekday(e.target.value)}>
               <option value="1">Segunda</option>
@@ -295,11 +291,16 @@ export default function ReservationModal({
         <hr />
 
         <p>Duração: {duration}h</p>
-        <p>Valor unitário: R$ {singlePrice}</p>
 
-        {billingMode === "weekly_monthly" && (
+        {bookingMode === "time" ? (
+          <p>Valor estimado: R$ {estimatedTimePrice}</p>
+        ) : (
+          <p>Preço definido pelo proprietário para esta modalidade</p>
+        )}
+
+        {planMode === "weekly_monthly" && (
           <p>
-            Estimativa mensal: <strong>R$ {monthlyEstimate}</strong>
+            Estimativa mensal: <strong>4 ocorrências</strong>
           </p>
         )}
 
