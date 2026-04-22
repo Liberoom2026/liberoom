@@ -42,57 +42,13 @@ function periodHours(period: string) {
   return 0
 }
 
-function pad(n: number) {
-  return String(n).padStart(2, "0")
-}
-
-function toDateKey(date: Date) {
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-}
-
 function parseDateKey(dateKey: string) {
   const [year, month, day] = dateKey.split("-").map(Number)
   return new Date(year, month - 1, day)
 }
 
-function startOfMonth(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), 1)
-}
-
-function addMonths(date: Date, amount: number) {
-  return new Date(date.getFullYear(), date.getMonth() + amount, 1)
-}
-
-function getMonthLabel(date: Date) {
-  return new Intl.DateTimeFormat("pt-BR", {
-    month: "long",
-    year: "numeric",
-  }).format(date)
-}
-
-function buildMonthGrid(monthDate: Date) {
-  const year = monthDate.getFullYear()
-  const month = monthDate.getMonth()
-  const firstDay = new Date(year, month, 1)
-  const lastDay = new Date(year, month + 1, 0)
-  const startWeekday = (firstDay.getDay() + 6) % 7
-  const totalDays = lastDay.getDate()
-
-  const cells: Array<Date | null> = []
-
-  for (let i = 0; i < startWeekday; i++) {
-    cells.push(null)
-  }
-
-  for (let day = 1; day <= totalDays; day++) {
-    cells.push(new Date(year, month, day))
-  }
-
-  while (cells.length % 7 !== 0) {
-    cells.push(null)
-  }
-
-  return cells
+function formatDateBR(dateKey: string) {
+  return new Intl.DateTimeFormat("pt-BR").format(parseDateKey(dateKey))
 }
 
 export default function ReservationModal({
@@ -121,9 +77,7 @@ export default function ReservationModal({
   const [months, setMonths] = useState(1)
 
   const [blockedRanges, setBlockedRanges] = useState<BlockRange[]>([])
-  const [currentMonth, setCurrentMonth] = useState<Date>(
-    startOfMonth(defaultDate ? parseDateKey(defaultDate) : new Date())
-  )
+  const [loadingBlocks, setLoadingBlocks] = useState(false)
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -139,13 +93,13 @@ export default function ReservationModal({
       setBookingMode("period")
     }
 
-    const baseDate = defaultDate ? parseDateKey(defaultDate) : new Date()
-    setCurrentMonth(startOfMonth(baseDate))
     fetchBlocks()
   }, [isOpen, defaultDate, defaultPeriod, propertyId])
 
   async function fetchBlocks() {
     if (!propertyId) return
+
+    setLoadingBlocks(true)
 
     try {
       const today = new Date()
@@ -160,6 +114,8 @@ export default function ReservationModal({
       setBlockedRanges(Array.isArray(data.blocks) ? data.blocks : [])
     } catch {
       setBlockedRanges([])
+    } finally {
+      setLoadingBlocks(false)
     }
   }
 
@@ -177,44 +133,6 @@ export default function ReservationModal({
     })
   }
 
-  function getDayStatus(day: Date) {
-    const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, 0, 0, 0)
-    const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 23, 59, 59, 999)
-
-    let hasAnyOverlap = false
-    let hasFullDayBlock = false
-
-    for (const block of blockedRanges) {
-      const blockStart = new Date(block.start_at)
-      const blockEnd = new Date(block.end_at)
-
-      const overlaps = blockStart <= dayEnd && blockEnd >= dayStart
-      if (overlaps) {
-        hasAnyOverlap = true
-
-        if (blockStart <= dayStart && blockEnd >= dayEnd) {
-          hasFullDayBlock = true
-          break
-        }
-      }
-    }
-
-    if (hasFullDayBlock) return "occupied"
-    if (hasAnyOverlap) return "partial"
-    return "free"
-  }
-
-  const selectedDayBlocks = useMemo(() => {
-    if (!date) return []
-
-    return blockedRanges
-      .filter((block) => {
-        const blockStart = new Date(block.start_at)
-        return toDateKey(blockStart) === date
-      })
-      .sort((a, b) => +new Date(a.start_at) - +new Date(b.start_at))
-  }, [blockedRanges, date])
-
   const duration = useMemo(() => {
     if (bookingMode === "time") return calcDuration(startTime, endTime)
     if (bookingMode === "period") return periodHours(period)
@@ -223,6 +141,17 @@ export default function ReservationModal({
   }, [bookingMode, startTime, endTime, period])
 
   const estimatedTimePrice = bookingMode === "time" ? pricePerHour * duration : null
+
+  const selectedDayBlocks = useMemo(() => {
+    if (!date) return []
+
+    return blockedRanges
+      .filter((block) => {
+        const blockStart = new Date(block.start_at)
+        return blockStart.toISOString().slice(0, 10) === date
+      })
+      .sort((a, b) => +new Date(a.start_at) - +new Date(b.start_at))
+  }, [blockedRanges, date])
 
   async function handleCheckout() {
     setError("")
@@ -323,7 +252,7 @@ export default function ReservationModal({
       }
 
       window.location.href = data.url
-    } catch (err) {
+    } catch {
       setError("Erro ao processar pagamento")
       setLoading(false)
     }
@@ -331,119 +260,56 @@ export default function ReservationModal({
 
   if (!isOpen) return null
 
-  const monthCells = buildMonthGrid(currentMonth)
-
   return (
     <div style={overlay}>
       <div style={modal}>
         <div style={headerRow}>
-          <h2 style={{ margin: 0 }}>Reservar {propertyTitle}</h2>
+          <div>
+            <h2 style={title}>Reservar {propertyTitle}</h2>
+            <p style={subtitle}>
+              {loadingBlocks ? "Carregando disponibilidade..." : "Escolha uma data e uma modalidade"}
+            </p>
+          </div>
+
           <button type="button" onClick={onClose} style={closeButton}>
             Fechar
           </button>
         </div>
 
-        <input
-          placeholder="Nome"
-          value={guestName}
-          onChange={(e) => setGuestName(e.target.value)}
-        />
-        <input
-          placeholder="Email"
-          value={guestEmail}
-          onChange={(e) => setGuestEmail(e.target.value)}
-        />
-
-        <div style={calendarCard}>
-          <div style={calendarHeader}>
-            <button
-              type="button"
-              style={navButton}
-              onClick={() => setCurrentMonth((prev) => addMonths(prev, -1))}
-            >
-              ←
-            </button>
-
-            <strong style={{ textTransform: "capitalize" }}>
-              {getMonthLabel(currentMonth)}
-            </strong>
-
-            <button
-              type="button"
-              style={navButton}
-              onClick={() => setCurrentMonth((prev) => addMonths(prev, 1))}
-            >
-              →
-            </button>
-          </div>
-
-          <div style={weekHeader}>
-            {["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"].map((day) => (
-              <div key={day} style={weekDayLabel}>
-                {day}
-              </div>
-            ))}
-          </div>
-
-          <div style={calendarGrid}>
-            {monthCells.map((cell, index) => {
-              if (!cell) {
-                return <div key={`empty-${index}`} style={emptyDayCell} />
-              }
-
-              const key = toDateKey(cell)
-              const status = getDayStatus(cell)
-              const isSelected = date === key
-              const isDisabled = status === "occupied"
-
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  disabled={isDisabled}
-                  onClick={() => {
-                    setDate(key)
-                    setError("")
-                  }}
-                  style={{
-                    ...dayCell,
-                    ...(status === "free" ? dayFree : {}),
-                    ...(status === "partial" ? dayPartial : {}),
-                    ...(status === "occupied" ? dayOccupied : {}),
-                    ...(isSelected ? daySelected : {}),
-                    ...(isDisabled ? dayDisabled : {}),
-                  }}
-                >
-                  {cell.getDate()}
-                </button>
-              )
-            })}
-          </div>
-
-          <div style={legendRow}>
-            <div style={legendItem}>
-              <span style={{ ...legendDot, background: "#e5f7eb" }} />
-              Livre
-            </div>
-            <div style={legendItem}>
-              <span style={{ ...legendDot, background: "#fff3cd" }} />
-              Parcial
-            </div>
-            <div style={legendItem}>
-              <span style={{ ...legendDot, background: "#f8d7da" }} />
-              Ocupado
-            </div>
-          </div>
+        <div style={section}>
+          <label style={label}>Nome</label>
+          <input
+            placeholder="Digite seu nome"
+            value={guestName}
+            onChange={(e) => setGuestName(e.target.value)}
+            style={inputStyle}
+          />
         </div>
 
-        <div>
-          <strong>Data selecionada:</strong>{" "}
-          {date ? new Intl.DateTimeFormat("pt-BR").format(parseDateKey(date)) : "nenhuma"}
+        <div style={section}>
+          <label style={label}>Email</label>
+          <input
+            placeholder="Digite seu email"
+            value={guestEmail}
+            onChange={(e) => setGuestEmail(e.target.value)}
+            style={inputStyle}
+          />
+        </div>
+
+        <div style={section}>
+          <label style={label}>Data</label>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            style={dateInputStyle}
+          />
+          {date && <span style={helperText}>Selecionado: {formatDateBR(date)}</span>}
         </div>
 
         {selectedDayBlocks.length > 0 && (
           <div style={blocksBox}>
-            <strong>Bloqueios nesse dia</strong>
+            <strong style={{ fontSize: 14 }}>Bloqueios nesse dia</strong>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {selectedDayBlocks.map((block, index) => (
                 <div key={`${block.id || index}`} style={blockLine}>
@@ -463,117 +329,141 @@ export default function ReservationModal({
           </div>
         )}
 
-        <h3>Tipo de reserva</h3>
-        <select
-          value={bookingMode}
-          onChange={(e) => setBookingMode(e.target.value as BookingMode)}
-        >
-          <option value="time">Por horário</option>
-          <option value="period">Por período</option>
-          <option value="day">Diária</option>
-          <option value="exclusive">Exclusiva</option>
-        </select>
+        <div style={section}>
+          <label style={label}>Tipo de reserva</label>
+          <select
+            value={bookingMode}
+            onChange={(e) => setBookingMode(e.target.value as BookingMode)}
+            style={selectStyle}
+          >
+            <option value="time">Por horário</option>
+            <option value="period">Por período</option>
+            <option value="day">Diária</option>
+            <option value="exclusive">Exclusiva</option>
+          </select>
+        </div>
 
         {bookingMode === "time" && (
-          <>
-            <input
-              type="time"
-              value={startTime}
-              onChange={(e) => {
-                const newStart = e.target.value
-                setError("")
+          <div style={gridTwo}>
+            <div style={section}>
+              <label style={label}>Hora inicial</label>
+              <input
+                type="time"
+                value={startTime}
+                onChange={(e) => {
+                  const newStart = e.target.value
+                  setError("")
 
-                if (isTimeBlocked(date, newStart, endTime)) {
-                  setError("Horário indisponível")
-                  return
-                }
+                  if (isTimeBlocked(date, newStart, endTime)) {
+                    setError("Horário indisponível")
+                    return
+                  }
 
-                setStartTime(newStart)
-              }}
-            />
-            <input
-              type="time"
-              value={endTime}
-              onChange={(e) => {
-                const newEnd = e.target.value
-                setError("")
+                  setStartTime(newStart)
+                }}
+                style={inputStyle}
+              />
+            </div>
 
-                if (isTimeBlocked(date, startTime, newEnd)) {
-                  setError("Horário indisponível")
-                  return
-                }
+            <div style={section}>
+              <label style={label}>Hora final</label>
+              <input
+                type="time"
+                value={endTime}
+                onChange={(e) => {
+                  const newEnd = e.target.value
+                  setError("")
 
-                setEndTime(newEnd)
-              }}
-            />
-          </>
+                  if (isTimeBlocked(date, startTime, newEnd)) {
+                    setError("Horário indisponível")
+                    return
+                  }
+
+                  setEndTime(newEnd)
+                }}
+                style={inputStyle}
+              />
+            </div>
+          </div>
         )}
 
         {bookingMode === "period" && (
-          <select value={period} onChange={(e) => setPeriod(e.target.value)}>
-            <option value="">Selecione</option>
-            <option value="morning">Manhã</option>
-            <option value="afternoon">Tarde</option>
-            <option value="evening">Noite</option>
-          </select>
+          <div style={section}>
+            <label style={label}>Período</label>
+            <select value={period} onChange={(e) => setPeriod(e.target.value)} style={selectStyle}>
+              <option value="">Selecione</option>
+              <option value="morning">Manhã</option>
+              <option value="afternoon">Tarde</option>
+              <option value="evening">Noite</option>
+            </select>
+          </div>
         )}
 
-        <h3>Plano</h3>
+        <div style={section}>
+          <label style={label}>Plano</label>
 
-        <label>
-          <input
-            type="radio"
-            checked={planMode === "one_time"}
-            onChange={() => setPlanMode("one_time")}
-          />
-          Reserva única
-        </label>
+          <div style={radioGroup}>
+            <label style={radioItem}>
+              <input
+                type="radio"
+                checked={planMode === "one_time"}
+                onChange={() => setPlanMode("one_time")}
+              />
+              <span>Reserva única</span>
+            </label>
 
-        <label>
-          <input
-            type="radio"
-            checked={planMode === "weekly_monthly"}
-            onChange={() => setPlanMode("weekly_monthly")}
-          />
-          Plano semanal (cobrança mensal)
-        </label>
+            <label style={radioItem}>
+              <input
+                type="radio"
+                checked={planMode === "weekly_monthly"}
+                onChange={() => setPlanMode("weekly_monthly")}
+              />
+              <span>Plano semanal (cobrança mensal)</span>
+            </label>
+          </div>
+        </div>
 
         {planMode === "weekly_monthly" && (
-          <>
-            <select value={weekday} onChange={(e) => setWeekday(e.target.value)}>
-              <option value="1">Segunda</option>
-              <option value="2">Terça</option>
-              <option value="3">Quarta</option>
-              <option value="4">Quinta</option>
-              <option value="5">Sexta</option>
-            </select>
+          <div style={planBox}>
+            <div style={section}>
+              <label style={label}>Dia da semana</label>
+              <select value={weekday} onChange={(e) => setWeekday(e.target.value)} style={selectStyle}>
+                <option value="1">Segunda</option>
+                <option value="2">Terça</option>
+                <option value="3">Quarta</option>
+                <option value="4">Quinta</option>
+                <option value="5">Sexta</option>
+              </select>
+            </div>
 
-            <input
-              type="number"
-              value={months}
-              onChange={(e) => setMonths(Number(e.target.value))}
-              min={1}
-            />
+            <div style={section}>
+              <label style={label}>Meses de compromisso</label>
+              <input
+                type="number"
+                value={months}
+                onChange={(e) => setMonths(Number(e.target.value))}
+                min={1}
+                style={inputStyle}
+              />
+            </div>
 
-            <p style={{ color: "red" }}>
-              Cancelamento antecipado cobra 1 mensalidade.
-            </p>
-          </>
+            <p style={warningText}>Cancelamento antecipado cobra 1 mensalidade.</p>
+          </div>
         )}
 
-        <hr />
+        <div style={summaryBox}>
+          <p style={summaryLine}>Duração: {duration}h</p>
 
-        <p>Duração: {duration}h</p>
+          {bookingMode === "time" ? (
+            <p style={summaryLine}>Valor estimado: R$ {estimatedTimePrice}</p>
+          ) : (
+            <p style={summaryLine}>Preço definido pelo proprietário</p>
+          )}
+        </div>
 
-        {bookingMode === "time" ? (
-          <p>Valor estimado: R$ {estimatedTimePrice}</p>
-        ) : (
-          <p>Preço definido pelo proprietário</p>
-        )}
+        {error && <p style={errorText}>{error}</p>}
 
-        {error && <p style={{ color: "red" }}>{error}</p>}
-
-        <button onClick={handleCheckout} disabled={loading}>
+        <button onClick={handleCheckout} disabled={loading} style={primaryButton}>
           {loading ? "Processando..." : "Confirmar reserva"}
         </button>
       </div>
@@ -584,146 +474,179 @@ export default function ReservationModal({
 const overlay = {
   position: "fixed" as const,
   inset: 0,
-  background: "rgba(0,0,0,0.5)",
+  background: "rgba(15, 23, 42, 0.55)",
+  backdropFilter: "blur(4px)",
   display: "flex",
   justifyContent: "center",
   alignItems: "center",
   zIndex: 9999,
+  padding: 16,
 }
 
 const modal = {
-  background: "white",
-  padding: 20,
-  borderRadius: 10,
+  background: "linear-gradient(180deg, #ffffff 0%, #fafafa 100%)",
+  padding: 22,
+  borderRadius: 18,
   display: "flex",
   flexDirection: "column" as const,
-  gap: 10,
-  width: "min(520px, 92vw)",
+  gap: 14,
+  width: "min(560px, 96vw)",
   maxHeight: "90vh",
   overflowY: "auto" as const,
+  boxShadow: "0 24px 80px rgba(15, 23, 42, 0.25)",
+  border: "1px solid rgba(148, 163, 184, 0.25)",
 }
 
 const headerRow = {
   display: "flex",
   justifyContent: "space-between",
-  alignItems: "center",
+  alignItems: "flex-start",
   gap: 12,
+}
+
+const title = {
+  margin: 0,
+  fontSize: 22,
+  lineHeight: 1.2,
+  color: "#0f172a",
+}
+
+const subtitle = {
+  margin: "4px 0 0",
+  fontSize: 13,
+  color: "#64748b",
 }
 
 const closeButton = {
-  padding: "6px 10px",
-  borderRadius: 8,
-  border: "1px solid #ccc",
-  background: "#f8f8f8",
+  padding: "8px 12px",
+  borderRadius: 10,
+  border: "1px solid #cbd5e1",
+  background: "#fff",
   cursor: "pointer",
+  fontWeight: 600,
+  color: "#0f172a",
 }
 
-const calendarCard = {
-  border: "1px solid #e5e7eb",
-  borderRadius: 12,
-  padding: 12,
-  background: "#fafafa",
+const section = {
   display: "flex",
   flexDirection: "column" as const,
-  gap: 10,
-}
-
-const calendarHeader = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
   gap: 8,
 }
 
-const navButton = {
-  padding: "6px 10px",
-  borderRadius: 8,
-  border: "1px solid #d1d5db",
-  background: "white",
+const label = {
+  fontSize: 13,
+  fontWeight: 700,
+  color: "#334155",
+}
+
+const inputStyle = {
+  padding: "12px 14px",
+  borderRadius: 12,
+  border: "1px solid #cbd5e1",
+  background: "#fff",
+  color: "#0f172a",
+  width: "100%",
+  fontSize: 14,
+  outline: "none",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.8)",
+}
+
+const dateInputStyle = {
+  ...inputStyle,
+  colorScheme: "light" as const,
+}
+
+const selectStyle = {
+  ...inputStyle,
   cursor: "pointer",
-  minWidth: 40,
 }
 
-const weekHeader = {
-  display: "grid",
-  gridTemplateColumns: "repeat(7, 1fr)",
-  gap: 6,
-}
-
-const weekDayLabel = {
-  textAlign: "center" as const,
+const helperText = {
   fontSize: 12,
-  fontWeight: 600,
-  color: "#6b7280",
+  color: "#64748b",
 }
 
-const calendarGrid = {
+const gridTwo = {
   display: "grid",
-  gridTemplateColumns: "repeat(7, 1fr)",
-  gap: 6,
-}
-
-const emptyDayCell = {
-  minHeight: 40,
-}
-
-const dayCell = {
-  minHeight: 40,
-  borderRadius: 10,
-  border: "1px solid #d1d5db",
-  background: "white",
-  cursor: "pointer",
-  fontWeight: 600,
-}
-
-const dayFree = {
-  background: "#e5f7eb",
-}
-
-const dayPartial = {
-  background: "#fff3cd",
-}
-
-const dayOccupied = {
-  background: "#f8d7da",
-}
-
-const daySelected = {
-  outline: "2px solid #111827",
-  outlineOffset: 1,
-}
-
-const dayDisabled = {
-  cursor: "not-allowed",
-  opacity: 0.75,
-}
-
-const legendRow = {
-  display: "flex",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
   gap: 12,
-  flexWrap: "wrap" as const,
-  fontSize: 12,
 }
 
-const legendItem = {
+const radioGroup = {
+  display: "flex",
+  flexDirection: "column" as const,
+  gap: 10,
+  padding: 12,
+  background: "#fff",
+  border: "1px solid #e2e8f0",
+  borderRadius: 12,
+}
+
+const radioItem = {
   display: "flex",
   alignItems: "center",
+  gap: 10,
+  fontSize: 14,
+  color: "#0f172a",
+}
+
+const planBox = {
+  display: "flex",
+  flexDirection: "column" as const,
+  gap: 12,
+  padding: 14,
+  borderRadius: 14,
+  border: "1px solid #e2e8f0",
+  background: "#f8fafc",
+}
+
+const warningText = {
+  margin: 0,
+  color: "#b91c1c",
+  fontSize: 13,
+  fontWeight: 600,
+}
+
+const summaryBox = {
+  padding: 14,
+  borderRadius: 14,
+  border: "1px solid #e2e8f0",
+  background: "#fff",
+  display: "flex",
+  flexDirection: "column" as const,
   gap: 6,
 }
 
-const legendDot = {
-  width: 12,
-  height: 12,
-  borderRadius: 999,
-  display: "inline-block",
-  border: "1px solid #d1d5db",
+const summaryLine = {
+  margin: 0,
+  color: "#0f172a",
+  fontSize: 14,
+}
+
+const errorText = {
+  margin: 0,
+  color: "#b91c1c",
+  fontWeight: 600,
+  fontSize: 14,
+}
+
+const primaryButton = {
+  padding: "12px 16px",
+  borderRadius: 12,
+  border: "none",
+  background: "#0f172a",
+  color: "#fff",
+  cursor: "pointer",
+  fontWeight: 700,
+  fontSize: 15,
+  transition: "transform 0.15s ease, opacity 0.15s ease",
 }
 
 const blocksBox = {
-  border: "1px solid #f3c7cc",
-  background: "#fff5f6",
-  borderRadius: 10,
-  padding: 10,
+  border: "1px solid #e2e8f0",
+  background: "#f8fafc",
+  borderRadius: 14,
+  padding: 12,
   display: "flex",
   flexDirection: "column" as const,
   gap: 8,
@@ -732,4 +655,8 @@ const blocksBox = {
 const blockLine = {
   fontSize: 13,
   color: "#7f1d1d",
+  background: "#fff",
+  border: "1px solid #fecaca",
+  borderRadius: 10,
+  padding: "8px 10px",
 }
