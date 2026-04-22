@@ -16,7 +16,7 @@ type BookingMode = "time" | "period" | "day" | "exclusive"
 type PlanMode = "one_time" | "weekly_monthly"
 
 const BACKEND_URL =
-  "https://checkout-backend-git-main-gustavos-projects-7b34e52c.vercel.app"
+  "https://checkout-backend-beta.vercel.app"
 
 function parseTime(time: string) {
   const [h, m] = time.split(":").map(Number)
@@ -61,6 +61,8 @@ export default function ReservationModal({
   const [weekday, setWeekday] = useState("1")
   const [months, setMonths] = useState(1)
 
+  const [blockedRanges, setBlockedRanges] = useState<any[]>([])
+
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
 
@@ -69,10 +71,42 @@ export default function ReservationModal({
 
     setDate(defaultDate || "")
     setPeriod(defaultPeriod || "morning")
+
     if (defaultPeriod) {
       setBookingMode("period")
     }
+
+    fetchBlocks()
   }, [isOpen, defaultDate, defaultPeriod])
+
+  async function fetchBlocks() {
+    if (!propertyId) return
+
+    const today = new Date()
+    const future = new Date()
+    future.setMonth(today.getMonth() + 2)
+
+    const res = await fetch(
+      `${BACKEND_URL}/api/get-booking-blocks?property_id=${propertyId}&start_date=${today.toISOString()}&end_date=${future.toISOString()}`
+    )
+
+    const data = await res.json()
+    setBlockedRanges(data.blocks || [])
+  }
+
+  function isTimeBlocked(selectedDate: string, start: string, end: string) {
+    if (!selectedDate) return false
+
+    const startAt = new Date(`${selectedDate}T${start}:00`)
+    const endAt = new Date(`${selectedDate}T${end}:00`)
+
+    return blockedRanges.some((block) => {
+      const blockStart = new Date(block.start_at)
+      const blockEnd = new Date(block.end_at)
+
+      return startAt < blockEnd && endAt > blockStart
+    })
+  }
 
   const duration = useMemo(() => {
     if (bookingMode === "time") return calcDuration(startTime, endTime)
@@ -81,7 +115,8 @@ export default function ReservationModal({
     return 0
   }, [bookingMode, startTime, endTime, period])
 
-  const estimatedTimePrice = bookingMode === "time" ? pricePerHour * duration : null
+  const estimatedTimePrice =
+    bookingMode === "time" ? pricePerHour * duration : null
 
   async function handleCheckout() {
     setError("")
@@ -101,6 +136,11 @@ export default function ReservationModal({
         setError("A hora final precisa ser maior que a inicial")
         return
       }
+
+      if (isTimeBlocked(date, startTime, endTime)) {
+        setError("Este horário já está reservado")
+        return
+      }
     }
 
     if (bookingMode === "period" && !period) {
@@ -112,8 +152,8 @@ export default function ReservationModal({
       bookingMode === "time"
         ? calcDuration(startTime, endTime)
         : bookingMode === "period"
-          ? periodHours(period)
-          : 24
+        ? periodHours(period)
+        : 24
 
     const payload: Record<string, unknown> = {
       property_id: propertyId,
@@ -128,33 +168,24 @@ export default function ReservationModal({
       cancel_url: `${window.location.origin}/cancel`,
     }
 
-if (bookingMode === "time") {
-  payload.start_time = startTime
-  payload.end_time = endTime
-  delete payload.period
-  delete payload.reservation_type
-}
+    if (bookingMode === "time") {
+      payload.start_time = startTime
+      payload.end_time = endTime
+      payload.period = ""
+    }
 
-if (bookingMode === "period") {
-  payload.period = period
-  delete payload.start_time
-  delete payload.end_time
-  delete payload.reservation_type
-}
+    if (bookingMode === "period") {
+      payload.period = period
+    }
 
-if (bookingMode === "day") {
-  payload.period = "day"
-  delete payload.start_time
-  delete payload.end_time
-  delete payload.reservation_type
-}
+    if (bookingMode === "day") {
+      payload.period = "day"
+    }
 
-if (bookingMode === "exclusive") {
-  payload.period = "day"
-  payload.reservation_type = "exclusive"
-  delete payload.start_time
-  delete payload.end_time
-}
+    if (bookingMode === "exclusive") {
+      payload.period = "day"
+      payload.reservation_type = "exclusive"
+    }
 
     if (planMode === "weekly_monthly") {
       payload.recurrence_type = "weekly"
@@ -169,13 +200,16 @@ if (bookingMode === "exclusive") {
     setLoading(true)
 
     try {
-      const res = await fetch(`${BACKEND_URL}/api/create-checkout-session`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      })
+      const res = await fetch(
+        `${BACKEND_URL}/api/create-checkout-session`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        }
+      )
 
       const data = await res.json()
 
@@ -236,12 +270,30 @@ if (bookingMode === "exclusive") {
             <input
               type="time"
               value={startTime}
-              onChange={(e) => setStartTime(e.target.value)}
+              onChange={(e) => {
+                const newStart = e.target.value
+
+                if (isTimeBlocked(date, newStart, endTime)) {
+                  setError("Horário indisponível")
+                  return
+                }
+
+                setStartTime(newStart)
+              }}
             />
             <input
               type="time"
               value={endTime}
-              onChange={(e) => setEndTime(e.target.value)}
+              onChange={(e) => {
+                const newEnd = e.target.value
+
+                if (isTimeBlocked(date, startTime, newEnd)) {
+                  setError("Horário indisponível")
+                  return
+                }
+
+                setEndTime(newEnd)
+              }}
             />
           </>
         )}
@@ -305,13 +357,7 @@ if (bookingMode === "exclusive") {
         {bookingMode === "time" ? (
           <p>Valor estimado: R$ {estimatedTimePrice}</p>
         ) : (
-          <p>Preço definido pelo proprietário para esta modalidade</p>
-        )}
-
-        {planMode === "weekly_monthly" && (
-          <p>
-            Estimativa mensal: <strong>4 ocorrências</strong>
-          </p>
+          <p>Preço definido pelo proprietário</p>
         )}
 
         {error && <p style={{ color: "red" }}>{error}</p>}
