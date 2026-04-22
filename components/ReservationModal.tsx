@@ -13,7 +13,6 @@ type Props = {
 }
 
 type BookingMode = "time" | "period" | "day" | "exclusive"
-type PlanMode = "one_time" | "weekly_monthly"
 
 const BACKEND_URL = "https://checkout-backend-beta.vercel.app"
 
@@ -27,14 +26,6 @@ function calcDuration(start: string, end: string) {
   return Math.max(1, Math.ceil(diff / 60))
 }
 
-function periodHours(period: string) {
-  if (period === "morning") return 4
-  if (period === "afternoon") return 6
-  if (period === "evening") return 4
-  if (period === "day") return 24
-  return 0
-}
-
 export default function ReservationModal({
   isOpen,
   onClose,
@@ -42,45 +33,25 @@ export default function ReservationModal({
   pricePerHour,
   propertyTitle = "Espaço",
   defaultDate = "",
-  defaultPeriod = "morning",
 }: Props) {
   const [guestName, setGuestName] = useState("")
   const [guestEmail, setGuestEmail] = useState("")
   const [date, setDate] = useState(defaultDate)
 
-  const [bookingMode, setBookingMode] = useState<BookingMode>(
-    defaultPeriod ? "period" : "time"
-  )
-  const [planMode, setPlanMode] = useState<PlanMode>("one_time")
-
-  const [period, setPeriod] = useState(defaultPeriod)
+  const [bookingMode, setBookingMode] = useState<BookingMode>("time")
   const [startTime, setStartTime] = useState("08:00")
   const [endTime, setEndTime] = useState("09:00")
 
-  const [weekday, setWeekday] = useState("1")
-  const [months, setMonths] = useState(1)
-
   const [blockedRanges, setBlockedRanges] = useState<any[]>([])
-
-  const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (!isOpen) return
-
-    setDate(defaultDate || "")
-    setPeriod(defaultPeriod || "morning")
-
-    if (defaultPeriod) {
-      setBookingMode("period")
-    }
-
     fetchBlocks()
-  }, [isOpen, defaultDate, defaultPeriod])
+  }, [isOpen])
 
   async function fetchBlocks() {
-    if (!propertyId) return
-
     const today = new Date()
     const future = new Date()
     future.setMonth(today.getMonth() + 2)
@@ -93,109 +64,36 @@ export default function ReservationModal({
     setBlockedRanges(data.blocks || [])
   }
 
-  function isTimeBlocked(selectedDate: string, start: string, end: string) {
-    if (!selectedDate) return false
+  function isTimeBlocked(date: string, start: string, end: string) {
+    const startAt = new Date(`${date}T${start}:00`)
+    const endAt = new Date(`${date}T${end}:00`)
 
-    const startAt = new Date(`${selectedDate}T${start}:00`)
-    const endAt = new Date(`${selectedDate}T${end}:00`)
-
-    return blockedRanges.some((block) => {
-      const blockStart = new Date(block.start_at)
-      const blockEnd = new Date(block.end_at)
-
-      return startAt < blockEnd && endAt > blockStart
+    return blockedRanges.some((b) => {
+      const s = new Date(b.start_at)
+      const e = new Date(b.end_at)
+      return startAt < e && endAt > s
     })
   }
 
-  // 🔥 NOVO: disponibilidade por dia
   const selectedDayBlocks = useMemo(() => {
     if (!date) return []
 
-    return blockedRanges
-      .filter((block) => {
-        const blockStart = new Date(block.start_at)
-        return blockStart.toISOString().slice(0, 10) === date
-      })
-      .sort((a, b) => +new Date(a.start_at) - +new Date(b.start_at))
+    return blockedRanges.filter((b) =>
+      new Date(b.start_at).toISOString().slice(0, 10) === date
+    )
   }, [blockedRanges, date])
-
-  const duration = useMemo(() => {
-    if (bookingMode === "time") return calcDuration(startTime, endTime)
-    if (bookingMode === "period") return periodHours(period)
-    if (bookingMode === "day" || bookingMode === "exclusive") return 24
-    return 0
-  }, [bookingMode, startTime, endTime, period])
-
-  const estimatedTimePrice =
-    bookingMode === "time" ? pricePerHour * duration : null
 
   async function handleCheckout() {
     setError("")
 
     if (!guestName || !guestEmail || !date) {
-      setError("Preencha nome, email e data")
+      setError("Preencha tudo")
       return
     }
 
-    if (bookingMode === "time") {
-      if (!startTime || !endTime) {
-        setError("Preencha o horário inicial e final")
-        return
-      }
-
-      if (parseTime(endTime) <= parseTime(startTime)) {
-        setError("A hora final precisa ser maior que a inicial")
-        return
-      }
-
-      if (isTimeBlocked(date, startTime, endTime)) {
-        setError("Este horário já está reservado")
-        return
-      }
-    }
-
-    if (bookingMode === "period" && !period) {
-      setError("Escolha um período")
+    if (isTimeBlocked(date, startTime, endTime)) {
+      setError("Horário já reservado")
       return
-    }
-
-    const durationHours =
-      bookingMode === "time"
-        ? calcDuration(startTime, endTime)
-        : bookingMode === "period"
-        ? periodHours(period)
-        : 24
-
-    const payload: Record<string, unknown> = {
-      property_id: propertyId,
-      guest_name: guestName,
-      guest_email: guestEmail,
-      date,
-      duration_hours: durationHours,
-      billing_mode: bookingMode,
-      reservation_type: bookingMode,
-      currency: "brl",
-      success_url: `${window.location.origin}/success`,
-      cancel_url: `${window.location.origin}/cancel`,
-    }
-
-    if (bookingMode === "time") {
-      payload.start_time = startTime
-      payload.end_time = endTime
-      payload.period = ""
-    }
-
-    if (bookingMode === "period") {
-      payload.period = period
-    }
-
-    if (bookingMode === "day") {
-      payload.period = "day"
-    }
-
-    if (bookingMode === "exclusive") {
-      payload.period = "day"
-      payload.reservation_type = "exclusive"
     }
 
     setLoading(true)
@@ -205,24 +103,22 @@ export default function ReservationModal({
         `${BACKEND_URL}/api/create-checkout-session`,
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(payload),
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            property_id: propertyId,
+            guest_name: guestName,
+            guest_email: guestEmail,
+            date,
+            start_time: startTime,
+            end_time: endTime,
+          }),
         }
       )
 
       const data = await res.json()
-
-      if (!res.ok) {
-        setError(data.error || "Erro ao criar checkout")
-        setLoading(false)
-        return
-      }
-
       window.location.href = data.url
-    } catch (err) {
-      setError("Erro ao processar pagamento")
+    } catch {
+      setError("Erro")
       setLoading(false)
     }
   }
@@ -232,48 +128,42 @@ export default function ReservationModal({
   return (
     <div style={overlay}>
       <div style={modal}>
-        <h2>Reservar {propertyTitle}</h2>
+        
+        {/* 🔥 DEBUG */}
+        <h2 style={{ background: "yellow", padding: 10 }}>
+          DEBUG MODAL 🚨
+        </h2>
 
         <input
           placeholder="Nome"
           value={guestName}
           onChange={(e) => setGuestName(e.target.value)}
         />
+
         <input
           placeholder="Email"
           value={guestEmail}
           onChange={(e) => setGuestEmail(e.target.value)}
         />
 
-        {/* CALENDÁRIO NORMAL */}
         <input
           type="date"
           value={date}
           onChange={(e) => setDate(e.target.value)}
         />
 
-        {/* 🔥 DISPONIBILIDADE */}
+        {/* DISPONIBILIDADE */}
         {date && (
-          <div style={availabilityBox}>
-            <strong>Disponibilidade</strong>
-
+          <div style={{ background: "#eee", padding: 10 }}>
             {selectedDayBlocks.length === 0 ? (
-              <p style={{ color: "green" }}>Dia totalmente livre</p>
+              <p style={{ color: "green" }}>Dia livre</p>
             ) : (
               <>
-                <p style={{ color: "red" }}>Horários ocupados:</p>
-
-                {selectedDayBlocks.map((block, i) => (
+                <p style={{ color: "red" }}>Ocupado:</p>
+                {selectedDayBlocks.map((b, i) => (
                   <div key={i}>
-                    {new Date(block.start_at).toLocaleTimeString("pt-BR", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}{" "}
-                    -{" "}
-                    {new Date(block.end_at).toLocaleTimeString("pt-BR", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
+                    {new Date(b.start_at).toLocaleTimeString("pt-BR")} -{" "}
+                    {new Date(b.end_at).toLocaleTimeString("pt-BR")}
                   </div>
                 ))}
               </>
@@ -281,37 +171,25 @@ export default function ReservationModal({
           </div>
         )}
 
-        <h3>Tipo de reserva</h3>
-        <select
-          value={bookingMode}
-          onChange={(e) => setBookingMode(e.target.value as BookingMode)}
-        >
-          <option value="time">Por horário</option>
-          <option value="period">Por período</option>
-          <option value="day">Diária</option>
-          <option value="exclusive">Exclusiva</option>
-        </select>
+        <input
+          type="time"
+          value={startTime}
+          onChange={(e) => setStartTime(e.target.value)}
+        />
 
-        {bookingMode === "time" && (
-          <>
-            <input
-              type="time"
-              value={startTime}
-              onChange={(e) => setStartTime(e.target.value)}
-            />
-            <input
-              type="time"
-              value={endTime}
-              onChange={(e) => setEndTime(e.target.value)}
-            />
-          </>
-        )}
+        <input
+          type="time"
+          value={endTime}
+          onChange={(e) => setEndTime(e.target.value)}
+        />
 
         {error && <p style={{ color: "red" }}>{error}</p>}
 
-        <button onClick={handleCheckout} disabled={loading}>
-          {loading ? "Processando..." : "Confirmar reserva"}
+        <button onClick={handleCheckout}>
+          {loading ? "..." : "Reservar"}
         </button>
+
+        <button onClick={onClose}>Fechar</button>
       </div>
     </div>
   )
@@ -324,7 +202,6 @@ const overlay = {
   display: "flex",
   justifyContent: "center",
   alignItems: "center",
-  zIndex: 9999,
 }
 
 const modal = {
@@ -334,12 +211,5 @@ const modal = {
   display: "flex",
   flexDirection: "column" as const,
   gap: 10,
-  width: "min(520px, 92vw)",
-}
-
-const availabilityBox = {
-  border: "1px solid #ddd",
-  borderRadius: 10,
-  padding: 10,
-  background: "#fafafa",
+  width: 400,
 }
